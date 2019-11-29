@@ -1,37 +1,41 @@
 import pytest
 from ddpg import *
+import gym
+import numpy as np
     
-def test_pendulum():
-    import gym
-    import numpy as np
+episode_length = 200
+env = gym.make('Pendulum-v0')
+ddpg = DDPG(env.observation_space.shape[0], env.action_space.shape[0])
 
-    env = gym.make('Pendulum-v0')
-    ddpg = DDPG(env.observation_space.shape[0], env.action_space.shape[0])
+def run(is_training=False):
+    state = env.reset().reshape((1, ddpg.input_dim))
+    for j in range(episode_length):
+            action = ddpg.act(state, is_training)
+            next_state,reward,done,_ = env.step(action)  
+            next_state = next_state.reshape((1, ddpg.input_dim))
 
-    episode_length = 200
-    num_episodes = 1000
+            if is_training:
+                ddpg.memorize(state, action, next_state, reward, done)
 
-    for i in range(num_episodes):
-        state = env.reset()
-
-        render = (i%5 == 0)
-        for j in range(episode_length):
-            print(np.array(state).reshape((1,ddpg.input_dim)))
-            print(state[0])
-            action = ddpg.act(np.array(state).reshape((1, env.observation_space.shape[0])))
-            next_state,reward,done,_ = env.step(action)
-
-            ddpg.memorize(np.array(state).reshape((1, ddpg.input_dim)), np.array(action).reshape((1, ddpg.output_dim)), np.array(next_state).reshape((1, ddpg.input_dim)), reward, done)
-            state = next_state
-
-            if j % 5 == 0:
+            if is_training and j % int(episode_length/2.0) == 0:
                 ddpg.train()
-
-            if render:
+            if not is_training:
                 env.render()
+                print(action)
+
+            state = next_state
 
             if done:
                 break
 
+def test_pendulum():
+    num_episodes = 1000
+
+    for i in range(num_episodes):
+        render = (i%5 == 0)
+        if render:
+            run(False)
+        else:
+            run(True)
             
         
