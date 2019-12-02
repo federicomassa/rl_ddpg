@@ -14,6 +14,7 @@ from keras.layers import Dense, Dropout, Input, BatchNormalization
 from keras.models import Sequential, Model
 from keras.layers.merge import Add, Concatenate
 from keras.optimizers import Adam
+import keras.backend as K
 
 class DDPG:
     def __init__(self, input_dim, output_dim, **kwargs):
@@ -29,7 +30,7 @@ class DDPG:
         # Smoothing factor for target networks (<<1)
         self.tau = kwargs.get('tau',0.01)
         # Memory size for experience replay
-        self.memory_size = kwargs.get('memory_size',4096)
+        self.memory_size = kwargs.get('memory_size',4000)
         # Size of minibatch (=how many samples to draw from experience per train)
         self.minibatch_size = kwargs.get('minibatch_size',256)
         # Probability of acting randomly (exploration)
@@ -49,6 +50,7 @@ class DDPG:
         self.output_dim = output_dim
 
         self.session = tf.Session()
+        K.set_session(self.session)
 
         self.memory = deque()
 
@@ -59,18 +61,27 @@ class DDPG:
 
         self.target_actor,_ = self.generate_actor()
         self.target_critic,_,_ = self.generate_critic()
+
+        self.target_actor.set_weights(self.actor.get_weights())
+        self.target_critic.set_weights(self.critic.get_weights())
         
+        print("------------------- Actor model -------------------")
+        print(self.actor.summary())
+        print("------------------- Critic model ------------------")
+        print(self.critic.summary())
+
         # Weights of actor model
         actor_weights = self.actor.trainable_weights
 
         # Variable that will hold the derivative dQ/da
-        self.__critic_action_grad = tf.placeholder('float', [None, 1])
+        self.__critic_action_grad = tf.placeholder(tf.float32, [None, self.output_dim])
 
         # Gradient of loss function dJ/d(w_pi) = -dQ(s,a)/da * d(pi)/d(w_pi)
         self.__actor_gradient = tf.gradients(self.actor.output, actor_weights, -self.__critic_action_grad)
-        
-        self.__optimize_actor = tf.train.AdamOptimizer(self.actor_lr).apply_gradients(zip(self.__actor_gradient, actor_weights))
+        grads = zip(self.__actor_gradient, actor_weights)
 
+        self.__optimize_actor = tf.train.AdamOptimizer(self.actor_lr).apply_gradients(grads)
+        
         self.__critic_gradient = tf.gradients(self.critic.output, self.critic_action_input)
 
         # Initialize for later gradient calculations
@@ -88,7 +99,7 @@ class DDPG:
         return action
 
     def __get_ornstein_uhlenbeck_action(self, action):
-        tau = 0.05
+        tau = 1
         # FIXME I don't think mu should be 0.0
         mu = 0.0
         sigma = 1.
@@ -101,7 +112,7 @@ class DDPG:
         return new_action
 
     def __get_gaussian_action(self, action):
-        new_action = action + np.random.randn(self.output_dim)
+        new_action = action + np.random.randn(self.output_dim)/2.0
         return new_action
 
     def generate_actor(self):
@@ -111,19 +122,18 @@ class DDPG:
         ###############################################################################
 
         state_input = Input(shape=(self.input_dim,))
-        state_h1 = Dense(400, activation='relu')(state_input)
-        state_bn = BatchNormalization()(state_h1)
-        state_h2 = Dense(300, activation='relu')(state_bn)
-        #state_h3 = Dense(128, activation='linear')(state_h2)
+        state_h1 = Dense(500, activation='relu')(state_input)
+        state_h2 = Dense(1000, activation='relu')(state_h1)
+        state_h3 = Dense(500, activation='relu')(state_h2)
 
-        actor_output = Dense(self.output_dim, activation='tanh')(BatchNormalization()(state_h2))
+        actor_output = Dense(self.output_dim, activation='tanh')(state_h3)
 
         model = Model(input=state_input, output=actor_output)
 
         adam = Adam(learning_rate=self.actor_lr)
 
         model.compile(optimizer=adam,
-        loss = 'mean_squared_error',
+        loss = 'mse',
         metrics=['mae']
         )
 
@@ -136,11 +146,11 @@ class DDPG:
         ###############################################################################
 
         state_input = Input(shape=(self.input_dim,))
-        state_h1 = Dense(400, activation='relu')(state_input)
-        state_h2 = Dense(300)(state_h1)
+        state_h1 = Dense(500, activation='relu')(state_input)
+        state_h2 = Dense(1000)(state_h1)
 
         action_input = Input(shape=(self.output_dim,))
-        action_h1 = Dense(300)(action_input)
+        action_h1 = Dense(500)(action_input)
 
         merged = Concatenate()([state_h2, action_h1])
         merged_h1 = Dense(500, activation='relu')(merged)
@@ -151,7 +161,7 @@ class DDPG:
 
         # Compile model
         model.compile(optimizer=adam,
-        loss = 'mean_squared_error',
+        loss = 'mse',
         metrics=['mae']
         )
 
@@ -170,12 +180,13 @@ class DDPG:
             return
 
         # Check args
-        epochs = kwargs.get('epochs',50)
+        epochs = kwargs.get('epochs',1)
         
         samples = self.sample_from_memory()
 
-        self.__train_actor(samples)
         self.__train_critic(samples)
+        self.__train_actor(samples)
+
         self.__update_target_networks()
 
         print("Noise scale:  {}".format(self.epsilon))
@@ -184,11 +195,19 @@ class DDPG:
         states = np.stack(samples[:,0]).reshape(samples.shape[0], -1)
         actions = np.stack(samples[:,1]).reshape(samples.shape[0], -1)
         next_states = np.stack(samples[:,2]).reshape(samples.shape[0], -1)
-        rewards = samples[:,3].reshape(samples.shape[0], -1)
+        rewards = np.stack(samples[:,3]).reshape(samples.shape[0], -1)
 
         predicted_actions = self.actor.predict(states)
-
         critic_gradient = self.session.run(self.__critic_gradient, feed_dict={self.critic_state_input: states, self.critic_action_input: predicted_actions})[0]
+
+        # # DEBUG
+        # state_t = states[0].reshape((-1, 3))
+        # action_t = predicted_actions[0].reshape((-1, 1))
+        # action_t2 = action_t + np.array([[0.001]])
+
+        # Q = self.session.run(self.critic.output, feed_dict={self.critic_state_input: state_t, self.critic_action_input: action_t})
+        # Q2 = self.session.run(self.critic.output, feed_dict={self.critic_state_input: state_t, self.critic_action_input: action_t2})
+
 
         self.session.run(self.__optimize_actor, feed_dict={self.actor_state_input: states, self.__critic_action_grad: critic_gradient})
 
@@ -196,12 +215,12 @@ class DDPG:
         states = np.stack(samples[:,0]).reshape(samples.shape[0], -1)
         actions = np.stack(samples[:,1]).reshape(samples.shape[0], -1)
         next_states = np.stack(samples[:,2]).reshape(samples.shape[0], -1)
-        rewards = samples[:,3].reshape(samples.shape[0], -1)
-        dones = samples[:,4].reshape(samples.shape[0], -1) 
+        rewards = np.stack(samples[:,3]).reshape(samples.shape[0], -1)
+        dones = np.stack(samples[:,4]).reshape(samples.shape[0], -1) 
 
         predicted_actions = self.target_actor.predict(next_states)
         rewards += self.gamma*self.target_critic.predict([next_states, predicted_actions])*(1 - dones)
-        self.critic.fit([states, actions], rewards)
+        self.critic.fit([states, actions], rewards, verbose=0)
 
     def __update_model_weights(self, model, target_model):
         weights = model.get_weights()
