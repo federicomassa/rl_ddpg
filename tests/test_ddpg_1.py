@@ -2,13 +2,21 @@ import pytest
 from ddpg import *
 import gym
 import numpy as np
+import os.path
 import pdb
 pdb.set_trace()
 
-
 episode_length = 200
 env = gym.make('Pendulum-v0')
-ddpg = DDPG(env.observation_space.shape[0], env.action_space.shape[0])
+ddpg = DDPG(env.observation_space.shape[0], env.action_space.shape[0], noise_model='ornstein_uhlenbeck')
+
+# Check if there's a saved model
+if os.path.isfile("actor_weights.h5") and os.path.isfile("critic_weights.h5"):
+    print("Loading model from {}, {}".format("actor_weights.h5", "critic_weights.h5"))
+    ddpg.actor.load_weights("actor_weights.h5")
+    ddpg.target_actor.load_weights("actor_weights.h5")
+    ddpg.critic.load_weights("critic_weights.h5")
+    ddpg.target_critic.load_weights("critic_weights.h5")
 
 def run(is_training=False):
     state = env.reset().reshape((1, ddpg.input_dim))
@@ -44,5 +52,9 @@ def test_pendulum():
             run(False)
         else:
             run(True)
+
+        if i%10 == 0:
+            ddpg.actor.save_weights('actor_weights.h5')
+            ddpg.critic.save_weights('critic_weights.h5')
             
         

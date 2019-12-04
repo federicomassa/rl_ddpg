@@ -168,7 +168,7 @@ class DDPG:
         return model, state_input, action_input
 
     def memorize(self, state, action, next_state, reward, done):
-        self.memory.append([state, action, next_state, reward, done])
+        self.memory.append([state, action, next_state, reward, float(done)])
         if len(self.memory) > self.memory_size:
             self.memory.popleft()
 
@@ -219,7 +219,7 @@ class DDPG:
         dones = np.stack(samples[:,4]).reshape(samples.shape[0], -1) 
 
         predicted_actions = self.target_actor.predict(next_states)
-        rewards += self.gamma*self.target_critic.predict([next_states, predicted_actions])*(1 - dones)
+        rewards += self.gamma*self.target_critic.predict([next_states, predicted_actions])*(1.0 - dones)
         self.critic.fit([states, actions], rewards, verbose=0)
 
     def __update_model_weights(self, model, target_model):
@@ -235,3 +235,31 @@ class DDPG:
     def __update_target_networks(self):
         self.__update_model_weights(self.actor, self.target_actor)
         self.__update_model_weights(self.critic, self.target_critic)
+
+    def save(self, save_id):
+        actor_save = save_id + "_actor_weight.h5"
+        critic_save = save_id + "_critic_weight.h5"
+        
+        self.actor.save_weights(actor_save)
+        self.critic.save_weights(critic_save)
+
+    def load(self, save_id):
+        actor_save = save_id + "_actor_weight.h5"
+        critic_save = save_id + "_critic_weight.h5"
+        # Check if there's a saved model
+        if self.save_exists(save_id):
+            print("Loading model from {}, {}".format(actor_save, critic_save))
+            self.actor.load_weights(actor_save)
+            self.target_actor.load_weights(actor_save)
+            self.critic.load_weights(critic_save)
+            self.target_critic.load_weights(critic_save)
+        else:
+            raise Exception("Saved data with id {} not available.".format(save_id))
+        
+    def save_exists(self, save_id):
+        # Check if there's a saved model
+        if os.path.isfile(actor_save) and os.path.isfile(critic_save):
+            return True
+        else:
+            return False
+        
