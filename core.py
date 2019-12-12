@@ -15,6 +15,7 @@ from keras.models import Sequential, Model
 from keras.layers.merge import Add, Concatenate
 from keras.optimizers import Adam
 import keras.backend as K
+import os.path
 
 class DDPG:
     def __init__(self, input_dim, output_dim, **kwargs):
@@ -38,13 +39,17 @@ class DDPG:
         # Decay of epsilon
         self.epsilon_decay = kwargs.get('epsilon_decay',0.99995)
 
+        # Used for temporally correlated noise models
+        self.last_action = None
+
         noise_models = {'ornstein_uhlenbeck' : self.__get_ornstein_uhlenbeck_action, 'gauss' : self.__get_gaussian_action}
         noise_model_name = kwargs.get('noise_model','gauss')
+
+        self.noise_model = noise_models[noise_model_name]
 
         if not noise_model_name in noise_models:
             raise Exception("Unknown noise model {}. Choose from: {}".format(noise_model, noise_models))
 
-        self.noise_model = noise_models[noise_model_name]
 
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -89,25 +94,33 @@ class DDPG:
 
     # Generate action. If in training, consider exploration
     def act(self, state, is_training=False):
-        action = self.actor.predict(np.array(state))
         if is_training:
+            action = self.actor.predict(np.array(state))
             if np.random.random() < self.epsilon:
                 # Exploration
-                action += self.noise_model(action)
+                if self.noise_model == self.__get_gaussian_action:
+                    action += self.noise_model(action)
+                elif self.noise_model == self.__get_ornstein_uhlenbeck_action and isinstance(self.last_action, np.ndarray):
+                    action = self.noise_model(self.last_action)
             self.epsilon *= self.epsilon_decay
+            self.last_action = action
+        else:
+            # Use target actor policy to act when not in training
+            action = self.target_actor.predict(np.array(state))
 
         return action
 
     def __get_ornstein_uhlenbeck_action(self, action):
+        action_t = action.reshape((self.output_dim,))
+
         tau = 1
-        # FIXME I don't think mu should be 0.0
         mu = 0.0
-        sigma = 1.
+        sigma = 2.
         sigma_bis = sigma*np.sqrt(2./tau)
 
         new_action = np.zeros(self.output_dim)
         for i in range(self.output_dim):
-            new_action[i] = (action[i] + (mu - action[i])/tau + sigma_bis*np.random.randn())
+            new_action[i] = (action_t[i] + (mu - action_t[i])/tau + sigma_bis*np.random.randn())
 
         return new_action
 
@@ -168,7 +181,7 @@ class DDPG:
         return model, state_input, action_input
 
     def memorize(self, state, action, next_state, reward, done):
-        self.memory.append([state, action, next_state, reward, float(done)])
+        self.memory.append([state, action, next_state, float(reward), float(done)])
         if len(self.memory) > self.memory_size:
             self.memory.popleft()
 
@@ -188,8 +201,6 @@ class DDPG:
         self.__train_actor(samples)
 
         self.__update_target_networks()
-
-        print("Noise scale:  {}".format(self.epsilon))
 
     def __train_actor(self, samples):
         states = np.stack(samples[:,0]).reshape(samples.shape[0], -1)
@@ -257,6 +268,8 @@ class DDPG:
             raise Exception("Saved data with id {} not available.".format(save_id))
         
     def save_exists(self, save_id):
+        actor_save = save_id + "_actor_weight.h5"
+        critic_save = save_id + "_critic_weight.h5"
         # Check if there's a saved model
         if os.path.isfile(actor_save) and os.path.isfile(critic_save):
             return True
