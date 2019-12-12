@@ -7,5 +7,5 @@ setup(
    author='Federico Massa',
    author_email='fedemassa91@gmail.com',
    packages=['rl_ddpg'],
-   install_requires=['tensorflow'], 
+   install_requires=['tensorflow', 'keras', 'numpy', 'matplotlib'], 
 )
