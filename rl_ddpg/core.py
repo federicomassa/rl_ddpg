@@ -266,7 +266,7 @@ class DDPG:
         
         # Check if there's a saved model
         if self.save_exists(save_id):
-            print("Loading model from {}, {}".format(actor_save, critic_save))
+            print("Loading model from {}, {}, {}, {}".format(actor_save, target_actor_save, critic_save, target_critic_save))
             self.actor.load_weights(actor_save)
             self.target_actor.load_weights(target_actor_save)
             self.critic.load_weights(critic_save)
