@@ -250,28 +250,38 @@ class DDPG:
     def save(self, save_id):
         actor_save = save_id + "_actor_weight.h5"
         critic_save = save_id + "_critic_weight.h5"
+        target_actor_save = save_id + "_target_actor_weight.h5"
+        target_critic_save = save_id + "_target_critic_weight.h5"
         
         self.actor.save_weights(actor_save)
+        self.target_actor.save_weights(target_actor_save)
         self.critic.save_weights(critic_save)
+        self.target_critic.save_weights(target_critic_save)
 
     def load(self, save_id):
         actor_save = save_id + "_actor_weight.h5"
         critic_save = save_id + "_critic_weight.h5"
+        target_actor_save = save_id + "_target_actor_weight.h5"
+        target_critic_save = save_id + "_target_critic_weight.h5" 
+        
         # Check if there's a saved model
         if self.save_exists(save_id):
             print("Loading model from {}, {}".format(actor_save, critic_save))
             self.actor.load_weights(actor_save)
-            self.target_actor.load_weights(actor_save)
+            self.target_actor.load_weights(target_actor_save)
             self.critic.load_weights(critic_save)
-            self.target_critic.load_weights(critic_save)
+            self.target_critic.load_weights(target_critic_save)
         else:
             raise Exception("Saved data with id {} not available.".format(save_id))
         
     def save_exists(self, save_id):
         actor_save = save_id + "_actor_weight.h5"
         critic_save = save_id + "_critic_weight.h5"
+        target_actor_save = save_id + "_target_actor_weight.h5"
+        target_critic_save = save_id + "_target_critic_weight.h5" 
+
         # Check if there's a saved model
-        if os.path.isfile(actor_save) and os.path.isfile(critic_save):
+        if os.path.isfile(actor_save) and os.path.isfile(critic_save) and os.path.isfile(target_actor_save) and os.path.isfile(target_critic_save):
             return True
         else:
             return False
